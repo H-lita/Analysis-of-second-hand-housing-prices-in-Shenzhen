@@ -1,0 +1,157 @@
+# 【爬取搜房网深圳二手房房价数据代码】
+
+from selenium.webdriver import Chrome
+from selenium.webdriver.common.keys import Keys
+import requests
+import re
+import pandas as pd
+
+# set_option 显示的行/列数 display.max_rows，display.max_columns，None显示所有行
+pd.set_option('display.max_columns',None)
+# 控制ChromeDriver，并允许您驱动浏览器
+chrome = Chrome(executable_path='D:\GoogleDownload\chromedriver.exe')
+
+# 列出不同区选项按钮的xpath
+# //*[@id="@(Model.clickid)@(viewSifo.pageType==1?"]/ul/li[1]/a
+xpath_1 = ['longgang','//*[@id="@(Model.clickid)@(viewSifo.pageType==1?"]/ul/li[1]/a']
+xpath_2 = ['longhua','//*[@id="@(Model.clickid)@(viewSifo.pageType==1?"]/ul/li[2]/a']
+xpath_3 = ['baoan','//*[@id="@(Model.clickid)@(viewSifo.pageType==1?"]/ul/li[3]/a']
+xpath_4 = ['nanshan','//*[@id="@(Model.clickid)@(viewSifo.pageType==1?"]/ul/li[4]/a']
+xpath_5 = ['futian','//*[@id="@(Model.clickid)@(viewSifo.pageType==1?"]/ul/li[5]/a']
+xpath_6 = ['luohu','//*[@id="@(Model.clickid)@(viewSifo.pageType==1?"]/ul/li[6]/a']
+xpath_7 = ['pingshan','//*[@id="@(Model.clickid)@(viewSifo.pageType==1?"]/ul/li[7]/a']
+xpath_8 = ['guangming','//*[@id="@(Model.clickid)@(viewSifo.pageType==1?"]/ul/li[8]/a']
+xpath_9 = ['yantian','//*[@id="@(Model.clickid)@(viewSifo.pageType==1?"]/ul/li[9]/a']
+xpath_10 = ['dapengxinqu','//*[@id="@(Model.clickid)@(viewSifo.pageType==1?"]/ul/li[10]/a']
+list_xpath = [xpath_1,xpath_2,xpath_3,xpath_4,xpath_5,xpath_6,xpath_7,xpath_8,xpath_9,xpath_10]
+
+url = 'https://sz.esf.fang.com/'
+
+response = chrome.get(url)
+df_all = pd.DataFrame()
+
+for xpath in list_xpath:
+    ele1 = chrome.find_element_by_xpath(xpath[1])
+    # 通过”Keys”类来模式输入键
+    ele1.send_keys(Keys.ENTER)
+    # 1.数据爬取 → 爬取所有房源信息(仅爬取非独栋别墅的房源信息)：
+    num_temp = []
+    num = []
+    df = pd.DataFrame()
+    p = 3 # 爬取页码数，可自定义
+#   p = int(re.search(r'\d+',chrome.find_element_by_xpath('//*[@id="list_D10_15"]/p[3]').text).group())
+    for page_num in range(1,p+1):
+        A_list = chrome.find_elements_by_xpath('//dl[@dataflag="bg"]')
+        for i in A_list:
+            # 1) xpath 结合 正则 将所需信息取出
+            # re.search 扫描整个字符串并返回第一个成功的匹配位置，group() 返回一个包含所有小组字符串的元组，从 1 到 所含的小组号。
+            info2 = re.search(r'\d+',i.get_attribute('data-bg')).group() \
+                    + '|'+i.find_elements_by_xpath('./dd/p')[0].text+ '|' \
+                    + i.find_elements_by_xpath('./dd/p')[2].text + '|' \
+                    + i.find_elements_by_xpath('./dd')[1].text
+            # 2) 初步探索发现
+            # 探索字段是否整齐
+#             info2 = info2.split('|')
+#             num_temp.append(len(info2))
+            # 将“XXXX年建”字段剔除
+            if re.search(r'(\d+年建.*?)\w', info2) != None:  # 先判断字段里是否有“XXXX年建”
+                info2 = info2.replace(re.search(r'(\d+年建.*?)\w', info2).group(1), '').split('|')         
+            else:
+                continue 
+            df = pd.concat([df, pd.DataFrame({info2[0]: info2[1:]}).T])
+            df = df.drop_duplicates()  # 删除重复数据
+            num.append(len(info2))
+        if page_num == 1:
+            ele2 = chrome.find_element_by_xpath("/html/body/div[4]/div[4]/div[5]/div/span[2]/a")
+            ele2.send_keys(Keys.ENTER)
+        elif page_num>1 and page_num <= p-1:
+            ele2 = chrome.find_element_by_xpath("/html/body/div[@class='main1200 clearfix']/div[@class='main945 floatl']/div[@class='page_box']/div[@class='page_al']/p[3]/a")
+            ele2.send_keys(Keys.ENTER)
+        else:
+            pass
+    # 探索字段是否整齐的输出
+    # print('-'*10+'查看爬取字段情况'+'-'*10)
+    # for i in set(num_temp):
+    #     print({i:'占比%s' % round(num_temp.count(i)/len(num_temp),2)})
+    # print('-'*50)
+    
+    print(len(num)) 
+    print(num.count(num[0]) == len(num))# 查看是不是每条都被转换成了相同长度
+#     print(num[0:20])
+#     print(df.head())
+    
+    # 2. 数据清洗
+    df.columns = ['roomnum-hall', 'area', 'floor', 'direction', 'owner', 'other', 'price']
+    print(df.head())
+    print(df.shape[0])  # 查看样本量
+    print(df.describe(include='all').T)  # 描述基本信息
+#     print(df['floor'].astype('str').str[0:3])
+    '''
+    查看爬取的数据，发现存在一列的数据存在多信息的情况，为方便数据分析，对数据进行拆分
+    '''
+    # # 增加district列，表明所属区
+    df['district'] = xpath[0]
+    
+    # # 1) roomnum-hall列拆分，并删除原列
+    df['roomnum'] = df['roomnum-hall'].astype('str').str[0:1]
+    df['hall'] = df['roomnum-hall'].astype('str').str[2:3]
+    del df['roomnum-hall']
+    
+    # # 2) area列去掉单位，只留数值
+    df['AREA'] = df['area'].apply(lambda x: x.replace('㎡', ''))
+    del df['area']    
+    
+    # # 3) floor列拆分只保留类别，去掉具体层数,并将类别用英文替换方便之后分析使用 
+    # 先两个都保留，看下统计描述结论
+    df['C_floor'] = df['floor'].astype('str').str[0:3].replace({'低层':'low','中层':'middle','高层':'high'})
+    df['floor_num'] = df['floor'].astype('str').apply(lambda x: re.findall(r'\d+', x)[0])
+    del df['floor']
+    
+    # # 4) other列进行清洗，对于字段中有"优质教育"的单独取出作为是否为学区房，并将值转换为二分类，分别用0，1代表“不是学区房”和“是学区房”
+    df = df.fillna('None')
+    df['school'] = df['other'].apply(lambda x: 0 if re.search(r'优质教育', x) == None else 1)
+
+    # # 5) other列进行清洗，对于字段中有"距X号线"的单独取出作为是否临近地铁的判断，并将值转换为二分类，分别用0，1代表"不近地铁"和"临近地铁"
+    df['subway'] = df['other'].astype('str').apply(lambda x: 0 if re.search(r'距\d+号线', x) == None else 1)
+
+    # # 6) price列进行拆分，保留每平单价，去掉总价,同时将每平价格的单位由“元”转换为“万元”
+    df['per_price_1'] = df['price'].astype('str').apply(lambda x: int(re.match(r'\d+', x.split('\n')[1])[0]) / 10000 if x != 'None' else None)
+    df['per_price_2'] = df['other'].astype('str').apply(lambda x: int(re.match(r'\d+', x.split('\n')[1])[0]) / 10000 if re.match(r'\d+',x.split('\n')[0]) != None else None)
+    df['per_price_3'] = df['owner'].astype('str').apply(lambda x: int(re.match(r'\d+', x.split('\n')[1])[0]) / 10000 if re.match(r'\d+',x.split('\n')[0]) != None else None)
+    df['per_price'] = df['per_price_1'].fillna(0) + df['per_price_2'].fillna(0) + df['per_price_3'].fillna(0)
+
+    # # 7) 去掉没有用的列
+    del df['other']
+    del df['direction']
+    del df['owner']
+    del df['price']
+    del df['per_price_1']
+    del df['per_price_2']
+    del df['per_price_3']
+    print(df.head())
+
+    # # 8) 合并不同区的数据
+    df_all = pd.concat([df_all,df])
+    df_all.to_excel(r'D:\learning\project_data\Data_of_House_Price_ShenZhen' + r'\szfj_' + xpath[0] + r'.xls')
+    print('已爬取%s的房源' % xpath[0])
+    print('-' * 50)
+    print('=' * 50)
+
+# 查看所有爬取到的信息的数据数情况(即行数)
+# os.chdir() 方法用于改变当前工作目录到指定的路径。
+import os
+# 存储路径可自定义
+os.chdir(r'D:\learning\project_data\Data_of_House_Price_ShenZhen')
+num_all = 0
+for i in os.listdir():
+    locals()[i.split('.')[0]] = pd.read_excel(r'D:\learning\project_data\Data_of_House_Price_ShenZhen' +'\\'+ i)
+    locals()[i.split('.')[0]] = locals()[i.split('.')[0]].drop_duplicates()
+    print('%s表共计%d条数据'%(i.split('.')[0],locals()[i.split('.')[0]].shape[0]))
+    num_all += locals()[i.split('.')[0]].shape[0]
+    print('-'*50)
+print('已爬取所有区的房源信息(去除独栋别墅),共计%d条信息' % num_all)
+
+# 关闭浏览器
+import time
+time.sleep(2)
+chrome.close()
