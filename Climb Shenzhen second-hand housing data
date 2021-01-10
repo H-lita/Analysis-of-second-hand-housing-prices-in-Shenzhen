@@ -151,7 +151,7 @@ for i in os.listdir():
     print('-'*50)
 print('已爬取所有区的房源信息(去除独栋别墅),共计%d条信息' % num_all)
 
-# 关闭浏览器
+# 将浏览器关闭
 import time
 time.sleep(2)
 chrome.close()
